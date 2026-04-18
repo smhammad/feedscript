@@ -111,13 +111,16 @@ def build_ico() -> Path:
 
 
 def install():
-    icns = build()
     ico = build_ico()
-    APP_RES.mkdir(parents=True, exist_ok=True)
-    target = APP_RES / "AppIcon.icns"
-    shutil.copyfile(icns, target)
-    print(f"Installed {target}")
     print(f"Built {ico}")
+
+    # .icns is macOS-only (iconutil doesn't exist on Windows/Linux)
+    if sys.platform == "darwin":
+        icns = build()
+        APP_RES.mkdir(parents=True, exist_ok=True)
+        target = APP_RES / "AppIcon.icns"
+        shutil.copyfile(icns, target)
+        print(f"Installed {target}")
 
     STATIC.mkdir(exist_ok=True)
     favicon_master = draw_master(MASTER)
