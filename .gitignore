@@ -1,0 +1,14 @@
+venv/
+__pycache__/
+*.pyc
+sessions/
+output/
+state.json
+.app_launch.log
+.DS_Store
+
+# PyInstaller build artifacts
+build/
+dist/
+*.spec.bak
+publish.sh

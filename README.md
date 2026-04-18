@@ -1,0 +1,83 @@
+# Feedscript
+
+A local-first desktop app that pulls a creator's top-performing short videos and turns them into a single searchable JSON of transcripts + metadata. Runs entirely on your own machine — no API keys, no cloud, no data leaving your computer.
+
+Built for people who need to *read* a creator's content to analyze it, not watch hours of it: marketers, researchers, content strategists.
+
+## What it does
+
+1. You log in with a throwaway account (cookies JSON or username+password).
+2. Enter a target username. Set filters — date range, minimum likes / comments / views, sort order.
+3. The app streams that account's videos into a table as they load.
+4. Pick your top N. Click Transcribe.
+5. While video 1 transcribes, video 2 is already downloading — a bounded queue keeps both phases running in parallel.
+6. Output: one `<run_name>.json` containing every clip's caption, likes, comments, views, timestamp, and full transcript.
+
+Ships as a native Mac app (`Feedscript.app`) and a Windows executable (`Feedscript.exe`) built from the same codebase.
+
+## Why it's worth looking at
+
+- **Runs entirely offline.** `openai-whisper` for transcription, `yt-dlp` for video download, `ffprobe` for the no-audio edge case. No external APIs. No tokens.
+- **Real desktop app**, not a terminal tool. pywebview wraps a FastAPI server in a native WKWebView window on Mac / WebView2 on Windows. A setup wizard detects missing dependencies and installs them with live-streamed logs.
+- **Pipelined download + transcribe.** A `queue.Queue(maxsize=3)` sits between a downloader thread and a transcriber thread so Whisper starts on clip 1 the instant it's on disk — roughly halving run time vs. sequential.
+- **Minimal interface, ruthless scope.** Greyscale, no feature bloat. Filters work on streamed-in posts as they arrive. Single JSON output. A library tab with copy / export / delete / reveal-in-Finder actions.
+
+## Install — macOS
+
+Requires macOS 11+ and Python 3 (pre-installed on recent macOS, or `brew install python@3.11`).
+
+1. Download or clone this repo.
+2. Double-click `Feedscript.app`. First launch installs the app environment, ffmpeg (via Homebrew), and the Whisper model (~460 MB download, one-time). Subsequent launches open in 2 seconds.
+3. Right-click → Open the first time to bypass Gatekeeper (the app is unsigned).
+
+Alternative: `./start.command` for a terminal-based launcher.
+
+## Install — Windows
+
+Grab `Feedscript.exe` from the latest [release](https://github.com/YOUR-USERNAME/feedscript/releases). The `.exe` bundles Python and every app component; the only one-time download is the Whisper model.
+
+ffmpeg is installed via `winget` if missing — the setup wizard does it for you.
+
+Alternative: clone the repo, install Python 3.11+, double-click `Feedscript.bat`.
+
+## How it's wired
+
+```
+┌──────────────────────┐    JS bridge    ┌─────────────────┐
+│  WKWebView / WebView2│ ──────────────> │   launcher.py   │
+│   (pywebview window) │                 │   (Python)      │
+└──────────────────────┘                 └────────┬────────┘
+         │                                        │ spawns / imports
+         ▼                                        ▼
+┌──────────────────────┐                 ┌─────────────────┐
+│  FastAPI server      │ ◄───────────────│   uvicorn       │
+│  localhost:8765      │       SSE       │                 │
+└──────────┬───────────┘                 └─────────────────┘
+           │
+           ▼
+┌──────────────────────────────────────────────────────────┐
+│  Download thread  ──►  Queue(maxsize=3)  ──►  Whisper    │
+│  (yt-dlp + cookies)                           (threaded) │
+└──────────────────────────────────────────────────────────┘
+```
+
+- When running from source, `launcher.py` spawns uvicorn as a subprocess.
+- When running from the PyInstaller `.exe`, uvicorn runs in-process on a background thread (no Python interpreter exists inside the bundle to subprocess to).
+- Downloads stay in `output/<target>/_tmp_<run>/` and are deleted once transcribed.
+- Instaloader session cookies are exported to a Netscape-format `cookies.txt` so yt-dlp can resolve URLs that require login.
+
+## Responsible use
+
+Feedscript downloads publicly-visible posts from platforms that may restrict automated access in their terms of service. Use it on content you have the right to analyze. Don't redistribute scraped media. I'm not responsible for how you use it.
+
+## Stack
+
+Python 3.11 · FastAPI · uvicorn · pywebview · instaloader · yt-dlp · openai-whisper · Pillow (icon gen) · PyInstaller (Windows builds)
+
+## License
+
+MIT — see [LICENSE](LICENSE).
+
+## Contact
+
+Shahzada Hammad — [LinkedIn](https://www.linkedin.com/in/shahzada-hammad/)
