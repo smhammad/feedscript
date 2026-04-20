@@ -264,16 +264,43 @@ class Api:
                 self.server_proc = subprocess.Popen(
                     [str(VENV_PY), "-m", "uvicorn", "app:app", "--host", "127.0.0.1", "--port", str(PORT)],
                     cwd=str(ROOT),
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                    text=True,
+                    bufsize=1,
                     creationflags=_SUBPROCESS_FLAGS,
                 )
             except Exception as e:
                 return {"ok": False, "error": f"Could not start server: {e}"}
 
+        server_log_path = ROOT / ".server.log"
+        server_log_path.write_text("")
+        captured: list[str] = []
+
+        def _drain():
+            proc = self.server_proc
+            if not proc or not proc.stdout:
+                return
+            try:
+                with open(server_log_path, "a") as f:
+                    for line in proc.stdout:
+                        captured.append(line)
+                        f.write(line)
+                        f.flush()
+            except Exception:
+                pass
+
+        drain_thread = threading.Thread(target=_drain, daemon=True)
+        drain_thread.start()
+
         for _ in range(120):
             if not IS_BUNDLED and self.server_proc and self.server_proc.poll() is not None:
-                return {"ok": False, "error": "Server exited immediately. Check that components are installed."}
+                time.sleep(0.1)  # let drain catch up
+                out = "".join(captured)
+                tail = out.strip().splitlines()[-5:] if out.strip() else []
+                detail = " | ".join(tail) if tail else "no output captured"
+                self._push_log(out.strip() or "(server produced no output)")
+                return {"ok": False, "error": f"Server exited (code {self.server_proc.returncode}): {detail}"}
             try:
                 with urlopen(SERVER_URL + "/api/auth/status", timeout=1) as r:
                     if r.status == 200:

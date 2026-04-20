@@ -5,6 +5,7 @@ sessions/
 output/
 state.json
 .app_launch.log
+.server.log
 .DS_Store
 
 # PyInstaller build artifacts
