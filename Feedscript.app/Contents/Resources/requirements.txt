@@ -1,0 +1,9 @@
+fastapi
+uvicorn[standard]
+jinja2
+python-multipart
+aiofiles
+instaloader
+yt-dlp
+openai-whisper
+pywebview

@@ -1,0 +1,407 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Feedscript — Setup</title>
+  <link rel="icon" type="image/png" sizes="256x256" href="../static/icon-256.png" />
+  <link rel="icon" type="image/png" sizes="64x64" href="../static/icon-64.png" />
+  <style>
+    :root {
+      --bg: #0e0e0e;
+      --bg-2: #161616;
+      --bg-3: #1e1e1e;
+      --line: #2a2a2a;
+      --line-2: #3a3a3a;
+      --fg: #e8e8e8;
+      --fg-dim: #9a9a9a;
+      --fg-mute: #6a6a6a;
+      --ok: #a6d18a;
+      --err: #ff8080;
+    }
+    * { box-sizing: border-box; }
+    html, body {
+      margin: 0; padding: 0;
+      background: var(--bg); color: var(--fg);
+      font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif;
+      font-size: 14px; line-height: 1.45;
+    }
+    header {
+      padding: 16px 24px;
+      border-bottom: 1px solid var(--line);
+      background: var(--bg-2);
+    }
+    header h1 { margin: 0; font-size: 15px; font-weight: 500; letter-spacing: 0.02em; }
+    main { padding: 22px 24px; max-width: 820px; margin: 0 auto; }
+    h2 { font-size: 14px; font-weight: 500; color: var(--fg); margin: 0 0 8px; }
+    p.lede { color: var(--fg-dim); margin: 0 0 20px; font-size: 13px; }
+
+    .status-line {
+      font-size: 12px;
+      color: var(--fg-dim);
+      margin: 0 0 14px;
+      padding: 8px 12px;
+      background: var(--bg-2);
+      border: 1px solid var(--line);
+      border-left-width: 3px;
+    }
+    .status-line.working { border-left-color: var(--fg); }
+    .status-line.ready { border-left-color: var(--fg-dim); color: var(--fg); }
+    .status-line.blocked { border-left-color: var(--err); }
+
+    body.booting header,
+    body.booting #wizard { display: none; }
+    body:not(.booting) #splash { display: none; }
+
+    #splash {
+      position: fixed;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-direction: column;
+      gap: 14px;
+      color: var(--fg-dim);
+      font-size: 13px;
+      letter-spacing: 0.2px;
+    }
+    .spinner {
+      width: 22px; height: 22px;
+      border: 2px solid var(--line-2);
+      border-top-color: var(--fg);
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    .dep {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      padding: 14px;
+      border: 1px solid var(--line);
+      background: var(--bg-2);
+      margin-bottom: 8px;
+    }
+    .dep .mark {
+      width: 14px; height: 14px; flex-shrink: 0;
+      border-radius: 50%;
+      background: var(--bg-3);
+      border: 1px solid var(--line-2);
+    }
+    .dep.ok .mark { background: var(--fg-dim); border-color: var(--fg-dim); }
+    .dep.missing .mark { background: var(--bg); border-color: var(--err); }
+    .dep.working .mark { background: var(--fg); border-color: var(--fg); animation: pulse 1s ease-in-out infinite; }
+    @keyframes pulse { 50% { opacity: 0.3; } }
+
+    .dep .title { flex-shrink: 0; min-width: 180px; font-size: 13px; }
+    .dep .note { color: var(--fg-mute); font-size: 12px; flex: 1; }
+    .dep .note.err { color: var(--err); }
+
+    button {
+      background: var(--fg); color: #000;
+      border: 1px solid var(--fg);
+      padding: 7px 14px; font-size: 13px; font-weight: 500;
+      cursor: pointer; font-family: inherit;
+      flex-shrink: 0;
+    }
+    button:hover:not(:disabled) { background: #d8d8d8; }
+    button:disabled { opacity: 0.35; cursor: not-allowed; }
+    button.ghost {
+      background: transparent; color: var(--fg);
+      border: 1px solid var(--line-2); font-weight: 400;
+    }
+    button.ghost:hover:not(:disabled) { border-color: var(--fg-dim); background: var(--bg-3); }
+
+    .actions {
+      display: flex; gap: 12px;
+      margin-top: 22px;
+      padding-top: 18px;
+      border-top: 1px solid var(--line);
+    }
+    .actions .grow { flex: 1; }
+
+    #log {
+      margin-top: 18px;
+      padding: 12px;
+      background: var(--bg-2);
+      border: 1px solid var(--line);
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 11px;
+      color: var(--fg-dim);
+      max-height: 200px;
+      overflow-y: auto;
+      white-space: pre-wrap;
+      word-break: break-all;
+    }
+    #log:empty { display: none; }
+
+    footer {
+      border-top: 1px solid var(--line);
+      padding: 14px 24px;
+      margin-top: 40px;
+      text-align: center;
+      color: var(--fg-mute);
+      font-size: 12px;
+    }
+    footer a {
+      color: var(--fg-dim);
+      text-decoration: none;
+      border-bottom: 1px solid var(--line-2);
+    }
+    footer a:hover { color: var(--fg); border-bottom-color: var(--fg-dim); }
+  </style>
+</head>
+<body class="booting">
+  <div id="splash">
+    <div class="spinner"></div>
+    <div id="splash-text">Starting…</div>
+  </div>
+
+  <header><h1>Feedscript</h1></header>
+  <main id="wizard">
+    <h2>Setup</h2>
+    <p class="lede">
+      A few things need to be in place before you launch. Click Install for anything missing.
+      This check runs once — future launches skip it.
+    </p>
+
+    <div id="status-line" class="status-line">Checking dependencies…</div>
+    <div id="deps"></div>
+
+    <div class="actions">
+      <button id="btn-recheck" class="ghost">Re-check</button>
+      <span class="grow"></span>
+      <button id="btn-launch" disabled>Launch app</button>
+    </div>
+
+    <div id="log"></div>
+  </main>
+
+  <footer>
+    Developed by <a href="https://www.linkedin.com/in/shahzada-hammad/" target="_blank" rel="noopener">Shahzada Hammad</a>
+  </footer>
+
+  <script>
+    const api = () => window.pywebview.api;
+    const depsEl = document.getElementById("deps");
+    const logEl = document.getElementById("log");
+    const statusEl = document.getElementById("status-line");
+    const btnLaunch = document.getElementById("btn-launch");
+    const btnRecheck = document.getElementById("btn-recheck");
+
+    const DEPS = [
+      {
+        key: "brew",
+        title: "Package manager",
+        describe: s => s.brew ? "ready" : "needed so the app can install media tools",
+        ok: s => s.brew === true,
+        install: async () => api().open_brew_install_in_terminal(),
+        installLabel: "Open installer",
+        autoCascade: false,
+        showOn: s => s.platform === "mac",
+      },
+      {
+        key: "ffmpeg",
+        title: "Media tools",
+        describe: s => (s.ffmpeg && s.ffprobe) ? "ready" : "needed to read audio from videos",
+        ok: s => s.ffmpeg && s.ffprobe,
+        install: async () => api().install_ffmpeg(),
+        needs: s => s.platform === "windows" ? s.winget === true : s.brew === true,
+        needsHint: s => s.platform === "windows" ? "winget is unavailable on this system" : "Install the package manager first",
+        autoCascade: true,
+      },
+      {
+        key: "packages",
+        title: "App components",
+        describe: s => {
+          const p = s.packages;
+          if (!p.venv_ready) return "one-time setup needed";
+          if (p.missing.length === 0) return "ready";
+          return `${p.missing.length} component${p.missing.length === 1 ? "" : "s"} to install`;
+        },
+        ok: s => s.packages.venv_ready && s.packages.missing.length === 0,
+        install: async () => api().install_packages(),
+        installLabel: "Install",
+        autoCascade: true,
+      },
+      {
+        key: "whisper",
+        title: "Transcription model",
+        describe: s => s.whisper_small ? "ready" : "~460 MB — downloads once",
+        ok: s => s.whisper_small === true,
+        install: async () => api().download_whisper_model("small"),
+        installLabel: "Download",
+        needs: s => s.packages.venv_ready && s.packages.missing.length === 0,
+        needsHint: "Install app components first",
+        autoCascade: true,
+      },
+    ];
+
+    let lastStatus = null;
+    let installing = false;
+    let cascading = false;
+
+    function setStatus(text, cls) {
+      statusEl.textContent = text;
+      statusEl.className = "status-line" + (cls ? " " + cls : "");
+    }
+
+    function visibleDeps(status) {
+      return DEPS.filter(d => !d.showOn || d.showOn(status));
+    }
+
+    function render(status) {
+      lastStatus = status;
+      depsEl.innerHTML = "";
+      let allOk = true;
+      let firstBlocker = null;
+      for (const d of visibleDeps(status)) {
+        const ok = d.ok(status);
+        if (!ok) {
+          allOk = false;
+          if (!firstBlocker) firstBlocker = d;
+        }
+        const gated = d.needs && !d.needs(status);
+        const row = document.createElement("div");
+        row.className = "dep " + (ok ? "ok" : "missing");
+        row.dataset.key = d.key;
+        const btn = document.createElement("button");
+        btn.textContent = d.installLabel || "Install";
+        btn.disabled = ok || gated || installing;
+        btn.onclick = () => runInstall(d);
+        const hint = typeof d.needsHint === "function" ? d.needsHint(status) : d.needsHint;
+        row.innerHTML =
+          `<span class="mark"></span>
+           <span class="title">${d.title}</span>
+           <span class="note ${ok ? "" : gated ? "err" : ""}">${gated ? hint : d.describe(status)}</span>`;
+        row.appendChild(btn);
+        depsEl.appendChild(row);
+      }
+      btnLaunch.disabled = !allOk || installing;
+      btnLaunch.textContent = allOk ? "Launch app" : (firstBlocker ? `Waiting: ${firstBlocker.title}` : "Launch app");
+      if (installing) {
+        setStatus("Installing — watch the log below for live output.", "working");
+      } else if (allOk) {
+        setStatus("All dependencies ready. Click Launch app.", "ready");
+      } else if (firstBlocker) {
+        setStatus(`Next step: ${firstBlocker.title}`, "blocked");
+      }
+    }
+
+    async function runInstall(d) {
+      if (installing) return;
+      installing = true;
+      render(lastStatus || { brew: false, ffmpeg: false, ffprobe: false, packages: { venv_ready: false, missing: [] }, whisper_small: false });
+      appendLog(`▶ ${d.title}…`);
+      let r = { ok: false, error: "no response" };
+      try {
+        r = await d.install();
+      } catch (e) {
+        appendLog("ERROR: " + (e?.message || e));
+      }
+      if (r && r.message) appendLog(r.message);
+      if (r && r.error) appendLog("ERROR: " + r.error);
+      appendLog(r && r.ok ? `✓ ${d.title}: done` : `✗ ${d.title}: failed`);
+      installing = false;
+      await recheck();
+
+      if (r && r.ok && d.autoCascade) {
+        const next = firstMissingAutoCascade();
+        if (next) {
+          appendLog(`▶ Next step: ${next.title}…`);
+          await runInstall(next);
+        }
+      }
+    }
+
+    function firstMissingAutoCascade() {
+      if (!lastStatus) return null;
+      for (const d of visibleDeps(lastStatus)) {
+        if (!d.ok(lastStatus) && d.autoCascade && (!d.needs || d.needs(lastStatus))) {
+          return d;
+        }
+      }
+      return null;
+    }
+
+    function appendLog(s) {
+      logEl.textContent += (logEl.textContent ? "\n" : "") + s;
+      logEl.scrollTop = logEl.scrollHeight;
+    }
+
+    window.pushSetupLog = function(line) { appendLog(line); };
+
+    function isAllReady(s) {
+      if (!s) return false;
+      for (const d of visibleDeps(s)) {
+        if (!d.ok(s)) return false;
+      }
+      return true;
+    }
+
+    async function autoLaunch() {
+      const splashText = document.getElementById("splash-text");
+      if (splashText) splashText.textContent = "Starting server…";
+      try {
+        const r = await api().launch_app();
+        if (!r || !r.ok) {
+          document.body.classList.remove("booting");
+          setStatus("Launch failed: " + ((r && r.error) || "see log"), "blocked");
+          appendLog("ERROR: " + ((r && r.error) || "could not launch"));
+        }
+      } catch (e) {
+        document.body.classList.remove("booting");
+        setStatus("Launch failed: " + (e?.message || e), "blocked");
+      }
+    }
+
+    async function recheck() {
+      setStatus("Checking…", "working");
+      try {
+        const status = await api().check_all();
+        render(status);
+        if (isAllReady(status)) {
+          if (!installing) autoLaunch();
+        } else {
+          document.body.classList.remove("booting");
+        }
+      } catch (e) {
+        document.body.classList.remove("booting");
+        setStatus("Check failed: " + (e?.message || e), "blocked");
+      }
+    }
+
+    btnRecheck.onclick = recheck;
+    btnLaunch.onclick = async () => {
+      btnLaunch.disabled = true;
+      btnLaunch.textContent = "Starting server…";
+      setStatus("Starting server…", "working");
+      appendLog("▶ Starting server…");
+      try {
+        const r = await api().launch_app();
+        if (!r.ok) {
+          appendLog("ERROR: " + (r.error || "could not launch"));
+          setStatus("Launch failed: " + (r.error || "see log"), "blocked");
+          btnLaunch.textContent = "Launch app";
+          btnLaunch.disabled = false;
+        }
+      } catch (e) {
+        appendLog("ERROR: " + (e?.message || e));
+        btnLaunch.textContent = "Launch app";
+        btnLaunch.disabled = false;
+      }
+    };
+
+    function waitForApi(attempt = 0) {
+      if (window.pywebview && window.pywebview.api) {
+        recheck();
+      } else if (attempt < 50) {
+        setTimeout(() => waitForApi(attempt + 1), 100);
+      } else {
+        document.body.innerHTML = "<main><p style='color:#ff8080'>Python bridge didn't load. Close and re-open the app.</p></main>";
+      }
+    }
+    waitForApi();
+  </script>
+</body>
+</html>

@@ -1,0 +1,192 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Feedscript</title>
+  <link rel="icon" type="image/png" sizes="256x256" href="/static/icon-256.png" />
+  <link rel="icon" type="image/png" sizes="64x64" href="/static/icon-64.png" />
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+  <header>
+    <h1>Feedscript</h1>
+    <div id="auth-bar"></div>
+  </header>
+
+  <nav class="app-nav hidden" id="app-nav">
+    <button class="nav-item active" data-screen="screen-main">Transcribe</button>
+    <button class="nav-item" data-screen="screen-library">Library</button>
+  </nav>
+
+  <main>
+    <section id="screen-login" class="screen">
+      <div class="warning">
+        <strong>Use a throwaway account.</strong>
+        Instagram may flag, rate-limit, or block the account used here. Do not log in with your personal account.
+      </div>
+
+      <div class="tabs">
+        <button class="tab active" data-tab="cookies">Cookies JSON</button>
+        <button class="tab" data-tab="password">Username &amp; password</button>
+      </div>
+
+      <form id="form-cookies" class="tab-panel active">
+        <p class="hint">
+          In a logged-in browser, use an extension like
+          <em>Cookie-Editor</em> or <em>EditThisCookie</em> &rarr; Export &rarr; JSON.
+          Paste the full JSON below. sessionid, ds_user_id, and csrftoken are extracted automatically.
+        </p>
+        <label>Cookies JSON
+          <textarea name="blob" rows="10" placeholder='[{"name":"sessionid","value":"...","domain":".instagram.com",...}, ...]' required></textarea>
+        </label>
+        <button type="submit">Log in</button>
+        <div class="err" data-err></div>
+      </form>
+
+      <form id="form-password" class="tab-panel">
+        <label>Username<input name="username" autocomplete="off" required /></label>
+        <label>Password<input name="password" type="password" required /></label>
+        <button type="submit">Log in</button>
+        <div class="err" data-err></div>
+      </form>
+    </section>
+
+    <section id="screen-main" class="screen hidden">
+      <div id="job-banner" class="job-banner hidden"></div>
+      <form id="form-fetch" class="form-fetch">
+        <div class="row">
+          <label class="grow">Target username
+            <input name="target" placeholder="e.g. natgeo" autocomplete="off" required />
+          </label>
+          <label>Max to scan
+            <input name="limit" type="number" value="100" min="1" max="1000" />
+          </label>
+          <label>Date from
+            <input name="date_from" type="date" />
+          </label>
+          <label>Date to
+            <input name="date_to" type="date" />
+          </label>
+          <button type="submit">Fetch posts</button>
+          <button type="button" id="stop-fetch" class="ghost" disabled>Stop</button>
+        </div>
+      </form>
+      <div id="profile-info" class="info"></div>
+      <div class="controls hidden" id="controls">
+        <div class="row">
+          <label>Sort by
+            <select id="sort-by">
+              <option value="likes">Likes</option>
+              <option value="comments">Comments</option>
+              <option value="views">Views (reels only)</option>
+              <option value="timestamp">Date</option>
+            </select>
+          </label>
+          <label>Order
+            <select id="sort-order">
+              <option value="desc">High → low</option>
+              <option value="asc">Low → high</option>
+            </select>
+          </label>
+          <label>Min likes
+            <input id="min-likes" type="number" min="0" placeholder="0" />
+          </label>
+          <label>Min comments
+            <input id="min-comments" type="number" min="0" placeholder="0" />
+          </label>
+          <label>Min views
+            <input id="min-views" type="number" min="0" placeholder="0" />
+          </label>
+          <label>Take top
+            <input id="take-n" type="number" value="10" min="1" />
+          </label>
+        </div>
+        <div class="row">
+          <label>Transcription quality
+            <select id="model">
+              <option value="tiny">Fastest</option>
+              <option value="base">Fast</option>
+              <option value="small" selected>Balanced</option>
+              <option value="medium">High</option>
+              <option value="large">Highest</option>
+            </select>
+          </label>
+          <label>Run name
+            <input id="run-name" placeholder="optional folder label" />
+          </label>
+          <label class="grow">Output folder
+            <input id="output-dir" placeholder="default: ./output/  (or absolute path like /Users/hammad/Desktop/transcripts)" />
+          </label>
+          <button id="btn-transcribe">Transcribe selected</button>
+        </div>
+      </div>
+      <div class="stats hidden" id="stats"></div>
+      <table id="post-table" class="hidden">
+        <thead>
+          <tr>
+            <th><input type="checkbox" id="check-all" /></th>
+            <th>#</th>
+            <th>Thumb</th>
+            <th>Caption</th>
+            <th class="num">Likes</th>
+            <th class="num">Comments</th>
+            <th class="num">Views</th>
+            <th>Date</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </section>
+
+    <section id="screen-library" class="screen hidden">
+      <div class="row between">
+        <h2>Library</h2>
+        <button id="btn-refresh-library" class="ghost">Refresh</button>
+      </div>
+      <p class="hint" id="library-empty-hint">Past transcription runs appear here. Each row is one JSON file containing all videos from that run.</p>
+      <div id="library-list"></div>
+    </section>
+
+    <section id="screen-job" class="screen hidden">
+      <div class="row between">
+        <h2>Transcription job</h2>
+        <div class="row">
+          <button id="btn-back" class="ghost">Back to list</button>
+          <button id="btn-cancel" class="ghost">Cancel</button>
+          <button id="btn-open-folder" class="ghost hidden">Open output folder</button>
+        </div>
+      </div>
+
+      <div class="phases phases-2">
+        <div class="phase" data-phase="download">
+          <div class="phase-head">
+            <span class="phase-name">1 · Download videos</span>
+            <span class="phase-count" data-count>—</span>
+          </div>
+          <div class="bar"><div class="fill" data-fill></div></div>
+          <div class="phase-current" data-current></div>
+        </div>
+        <div class="phase" data-phase="transcribe">
+          <div class="phase-head">
+            <span class="phase-name">2 · Transcribe</span>
+            <span class="phase-count" data-count>—</span>
+          </div>
+          <div class="bar"><div class="fill" data-fill></div></div>
+          <div class="phase-current" data-current></div>
+        </div>
+      </div>
+
+      <div id="job-summary" class="info"></div>
+      <ul id="job-log"></ul>
+    </section>
+  </main>
+
+  <footer>
+    Developed by <a href="https://www.linkedin.com/in/shahzada-hammad/" target="_blank" rel="noopener">Shahzada Hammad</a>
+  </footer>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>

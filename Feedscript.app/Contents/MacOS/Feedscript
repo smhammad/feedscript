@@ -1,17 +1,37 @@
 #!/bin/bash
-# Bootstrap + launcher for Feedscript.app
-# Must live at <project>/Feedscript.app/Contents/MacOS/Feedscript
+# Feedscript.app entry point.
+#
+# Two run modes:
+#   1. Portable — code shipped inside Contents/Resources/, data in
+#      ~/Library/Application Support/Feedscript/. Used when the .app
+#      lives outside the project source tree.
+#   2. Dev — code alongside the .app (bundle's parent dir), data there
+#      too. Used when you double-click the .app inside the checkout.
 
 APP_BUNDLE="$(cd "$(dirname "$0")/../.." && pwd)"
-PROJECT_DIR="$(dirname "$APP_BUNDLE")"
-cd "$PROJECT_DIR"
+APP_RES="$(cd "$(dirname "$0")/../Resources" && pwd)"
+BUNDLE_PARENT="$(dirname "$APP_BUNDLE")"
 
-LOG="$PROJECT_DIR/.app_launch.log"
+if [ -f "$APP_RES/launcher.py" ]; then
+    CODE_DIR="$APP_RES"
+    DATA_DIR="$HOME/Library/Application Support/Feedscript"
+else
+    CODE_DIR="$BUNDLE_PARENT"
+    DATA_DIR="$BUNDLE_PARENT"
+fi
+
+mkdir -p "$DATA_DIR"
+cd "$DATA_DIR"
+
+LOG="$DATA_DIR/.app_launch.log"
 exec > "$LOG" 2>&1
 
 if [[ -f /opt/homebrew/bin/brew ]]; then eval "$(/opt/homebrew/bin/brew shellenv)"; fi
 if [[ -f /usr/local/bin/brew ]]; then eval "$(/usr/local/bin/brew shellenv)"; fi
 export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
+
+export FEEDSCRIPT_CODE_DIR="$CODE_DIR"
+export FEEDSCRIPT_DATA_DIR="$DATA_DIR"
 
 die() {
     osascript -e "display dialog \"$1\" buttons {\"OK\"} default button 1 with title \"Feedscript\"" >/dev/null 2>&1
@@ -22,18 +42,17 @@ if ! command -v python3 >/dev/null 2>&1; then
     die "Python 3 is required. Install it from python.org or run: brew install python@3.11"
 fi
 
-if [ ! -x "$PROJECT_DIR/venv/bin/python3" ]; then
-    python3 -m venv "$PROJECT_DIR/venv" || die "Could not set up the app environment in the project folder."
-    "$PROJECT_DIR/venv/bin/pip" install --upgrade pip >/dev/null 2>&1
+if [ ! -x "$DATA_DIR/venv/bin/python3" ]; then
+    python3 -m venv "$DATA_DIR/venv" || die "Could not set up the app environment at $DATA_DIR/venv."
+    "$DATA_DIR/venv/bin/pip" install --upgrade pip >/dev/null 2>&1
 fi
 
-if ! "$PROJECT_DIR/venv/bin/python3" -c "import webview" 2>/dev/null; then
-    "$PROJECT_DIR/venv/bin/pip" install pywebview || die "Could not install the app window library. Check $LOG for details."
+if ! "$DATA_DIR/venv/bin/python3" -c "import webview" 2>/dev/null; then
+    "$DATA_DIR/venv/bin/pip" install pywebview || die "Could not install the app window library. Check $LOG."
 fi
 
-# On Apple Silicon, pin arm64 so subprocesses don't flip to x86_64 under pywebview's context
 if [[ "$(uname -m)" == "arm64" ]]; then
-    exec arch -arm64 "$PROJECT_DIR/venv/bin/python3" "$PROJECT_DIR/launcher.py"
+    exec arch -arm64 "$DATA_DIR/venv/bin/python3" "$CODE_DIR/launcher.py"
 else
-    exec "$PROJECT_DIR/venv/bin/python3" "$PROJECT_DIR/launcher.py"
+    exec "$DATA_DIR/venv/bin/python3" "$CODE_DIR/launcher.py"
 fi
