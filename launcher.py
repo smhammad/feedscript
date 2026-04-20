@@ -1,6 +1,5 @@
 import json
 import os
-import platform
 import shutil
 import signal
 import subprocess
@@ -16,7 +15,25 @@ import webview
 IS_WINDOWS = sys.platform == "win32"
 IS_MAC = sys.platform == "darwin"
 IS_BUNDLED = bool(getattr(sys, "frozen", False))
-IS_APPLE_SILICON = IS_MAC and platform.machine() == "arm64"
+
+
+def _is_apple_silicon_hardware() -> bool:
+    """Detect M-series hardware regardless of whether the current Python
+    is running as arm64 or x86_64 (under Rosetta). `platform.machine()`
+    reflects the process arch, not the host, so we shell out to sysctl."""
+    if not IS_MAC:
+        return False
+    try:
+        r = subprocess.run(
+            ["sysctl", "-n", "hw.optional.arm64"],
+            capture_output=True, text=True, timeout=2,
+        )
+        return r.stdout.strip() == "1"
+    except Exception:
+        return False
+
+
+IS_APPLE_SILICON = _is_apple_silicon_hardware()
 
 if IS_BUNDLED:
     ROOT = Path(sys._MEIPASS).resolve() if hasattr(sys, "_MEIPASS") else Path(sys.executable).parent.resolve()
