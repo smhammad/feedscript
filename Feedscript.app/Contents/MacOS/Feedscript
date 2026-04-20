@@ -31,4 +31,9 @@ if ! "$PROJECT_DIR/venv/bin/python3" -c "import webview" 2>/dev/null; then
     "$PROJECT_DIR/venv/bin/pip" install pywebview || die "Could not install the app window library. Check $LOG for details."
 fi
 
-exec "$PROJECT_DIR/venv/bin/python3" "$PROJECT_DIR/launcher.py"
+# On Apple Silicon, pin arm64 so subprocesses don't flip to x86_64 under pywebview's context
+if [[ "$(uname -m)" == "arm64" ]]; then
+    exec arch -arm64 "$PROJECT_DIR/venv/bin/python3" "$PROJECT_DIR/launcher.py"
+else
+    exec "$PROJECT_DIR/venv/bin/python3" "$PROJECT_DIR/launcher.py"
+fi

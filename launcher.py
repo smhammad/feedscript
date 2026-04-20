@@ -1,5 +1,6 @@
 import json
 import os
+import platform
 import shutil
 import signal
 import subprocess
@@ -15,6 +16,7 @@ import webview
 IS_WINDOWS = sys.platform == "win32"
 IS_MAC = sys.platform == "darwin"
 IS_BUNDLED = bool(getattr(sys, "frozen", False))
+IS_APPLE_SILICON = IS_MAC and platform.machine() == "arm64"
 
 if IS_BUNDLED:
     ROOT = Path(sys._MEIPASS).resolve() if hasattr(sys, "_MEIPASS") else Path(sys.executable).parent.resolve()
@@ -37,6 +39,15 @@ CORE_IMPORTS = {
 }
 
 _SUBPROCESS_FLAGS = 0x08000000 if IS_WINDOWS else 0  # CREATE_NO_WINDOW
+
+
+def arch_pinned_cmd(cmd: list) -> list:
+    """On Apple Silicon, pin arm64 so subprocesses don't fall back to the x86_64
+    slice of universal Python binaries (which causes arch mismatches with
+    arm64-built wheels like pydantic_core)."""
+    if IS_APPLE_SILICON:
+        return ["arch", "-arm64"] + [str(c) for c in cmd]
+    return [str(c) for c in cmd]
 
 
 def brew_aware_path() -> list[str]:
@@ -83,7 +94,7 @@ def check_python_packages() -> dict:
     )
     try:
         r = subprocess.run(
-            [str(VENV_PY), "-c", script],
+            arch_pinned_cmd([VENV_PY, "-c", script]),
             capture_output=True, text=True, timeout=30,
             creationflags=_SUBPROCESS_FLAGS,
         )
@@ -205,10 +216,10 @@ class Api:
             if rc != 0:
                 return {"ok": False, "error": "Could not create venv"}
         self._push_log("Upgrading pip…")
-        self._stream_cmd([str(VENV_PY), "-m", "pip", "install", "--upgrade", "pip"], timeout=300)
+        self._stream_cmd(arch_pinned_cmd([VENV_PY, "-m", "pip", "install", "--upgrade", "pip"]), timeout=300)
         self._push_log("Installing app components — this can take several minutes on first run.")
         rc = self._stream_cmd(
-            [str(VENV_PY), "-m", "pip", "install", "-r", str(REQS)],
+            arch_pinned_cmd([VENV_PY, "-m", "pip", "install", "-r", REQS]),
             timeout=1800,
         )
         if rc != 0:
@@ -234,7 +245,7 @@ class Api:
             f"whisper.load_model({name!r})\n"
             "print('whisper_model_ready')\n"
         )
-        rc = self._stream_cmd([str(VENV_PY), "-c", code], timeout=1800)
+        rc = self._stream_cmd(arch_pinned_cmd([VENV_PY, "-c", code]), timeout=1800)
         return {"ok": rc == 0}
 
     def launch_app(self) -> dict:
@@ -262,7 +273,7 @@ class Api:
         else:
             try:
                 self.server_proc = subprocess.Popen(
-                    [str(VENV_PY), "-m", "uvicorn", "app:app", "--host", "127.0.0.1", "--port", str(PORT)],
+                    arch_pinned_cmd([VENV_PY, "-m", "uvicorn", "app:app", "--host", "127.0.0.1", "--port", str(PORT)]),
                     cwd=str(ROOT),
                     stdout=subprocess.PIPE,
                     stderr=subprocess.STDOUT,
