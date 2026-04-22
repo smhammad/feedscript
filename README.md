@@ -6,9 +6,9 @@ Built for people who need to *read* a creator's content to analyze it, not watch
 
 ## Download
 
-**macOS** — [Homebrew](https://brew.sh) (cleanest, no Gatekeeper prompt):
+**macOS** — one-line install (skips the Gatekeeper prompt):
 ```bash
-brew install --cask https://raw.githubusercontent.com/smhammad/feedscript/main/Casks/feedscript.rb
+curl -fsSL https://raw.githubusercontent.com/smhammad/feedscript/main/install.sh | bash
 ```
 
 Or grab the build directly from the [releases page](https://github.com/smhammad/feedscript/releases/latest):
@@ -38,13 +38,19 @@ Ships as a native Mac app (`Feedscript.app`) and a Windows executable (`Feedscri
 
 ## Install — macOS
 
-### Homebrew (recommended)
+### One-line install (recommended)
 
 ```bash
-brew install --cask https://raw.githubusercontent.com/smhammad/feedscript/main/Casks/feedscript.rb
+curl -fsSL https://raw.githubusercontent.com/smhammad/feedscript/main/install.sh | bash
 ```
 
-Homebrew downloads the app, strips the macOS quarantine attribute, and drops `Feedscript.app` into `/Applications` — no Gatekeeper prompt, no `xattr` dance. To update later, re-run the same command against a new release tag.
+This downloads the latest release, strips the macOS quarantine attribute, and installs `Feedscript.app` into `/Applications` — no Gatekeeper prompt. Re-run the same command to update to a new release.
+
+You can inspect the script first at [install.sh](install.sh) if you'd rather not pipe to `bash` blind — it's 40 lines.
+
+### Homebrew tap
+
+If you prefer the `brew` flow, a Homebrew Cask is available in this repo under [Casks/feedscript.rb](Casks/feedscript.rb). Homebrew doesn't install casks from raw URLs, so either clone this repo and point `brew install --cask` at the local file, or ask me to publish a proper `homebrew-feedscript` tap.
 
 ### Manual download
 
