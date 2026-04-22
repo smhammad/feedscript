@@ -318,34 +318,44 @@ def auth_logout():
 def _post_views(p: instaloader.Post):
     """Return the 'views' number the IG app shows for this post.
 
-    Instagram's public GraphQL API returns `video_view_count`, which is an
-    older "completed view" metric — typically much smaller than the
-    `play_count` shown in the mobile app. The iPhone-style media endpoint
-    returns the accurate `play_count`, so we prefer that when logged in.
-
-    Falls back gracefully to whatever the web API exposed if the iPhone
-    call fails (e.g. rate-limited or older instaloader without the
-    method).
+    Order of preference:
+      1. iPhone-style media endpoint `play_count` — matches IG app exactly.
+         Instaloader exposes it via the `_iphone_struct` property (name
+         starts with underscore but it is the public path; no callable
+         alternative in instaloader 4.15).
+      2. `video_play_count` property (instaloader >= 4.14.3) — may fall
+         back to a GraphQL call that can also return play_count.
+      3. Legacy `video_view_count` — the older "completed views" metric
+         usually surfaced by the public web API. Last resort; will often
+         undercount vs. what the IG app shows.
     """
-    if getattr(p, "is_video", False):
-        try:
-            if hasattr(p, "get_iphone_struct"):
-                struct = p.get_iphone_struct()
-                if struct:
-                    for key in ("play_count", "ig_play_count", "view_count", "video_view_count"):
-                        v = struct.get(key)
-                        if v is not None:
-                            return v
-        except Exception:
-            pass
+    if not getattr(p, "is_video", False):
+        return None
 
-    for attr in ("video_view_count", "video_play_count", "play_count", "viewer_count"):
-        try:
-            v = getattr(p, attr, None)
-        except Exception:
-            v = None
+    try:
+        struct = p._iphone_struct  # property access triggers the API call
+        if struct:
+            for key in ("play_count", "ig_play_count", "view_count"):
+                v = struct.get(key)
+                if v is not None:
+                    return v
+    except Exception:
+        pass
+
+    try:
+        v = getattr(p, "video_play_count", None)
         if v is not None:
             return v
+    except Exception:
+        pass
+
+    try:
+        v = p.video_view_count
+        if v is not None:
+            return v
+    except Exception:
+        pass
+
     try:
         node = getattr(p, "_node", None) or {}
         for key in ("video_play_count", "ig_play_count", "play_count", "video_view_count", "viewer_count"):
