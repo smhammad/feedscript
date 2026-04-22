@@ -6,10 +6,15 @@ Built for people who need to *read* a creator's content to analyze it, not watch
 
 ## Download
 
-Grab the latest build from the [releases page](https://github.com/smhammad/feedscript/releases/latest):
+**macOS** — [Homebrew](https://brew.sh) (cleanest):
+```bash
+brew install --cask smhammad/feedscript/feedscript
+```
 
-- **macOS** (Apple Silicon + Intel) — [`Feedscript-macOS.zip`](https://github.com/smhammad/feedscript/releases/latest/download/Feedscript-macOS.zip) — unzip and drag `Feedscript.app` to `/Applications`
-- **Windows 10/11** — [`Feedscript.exe`](https://github.com/smhammad/feedscript/releases/latest/download/Feedscript.exe) — double-click to run
+Or grab the build directly from the [releases page](https://github.com/smhammad/feedscript/releases/latest):
+
+- [`Feedscript-macOS.zip`](https://github.com/smhammad/feedscript/releases/latest/download/Feedscript-macOS.zip) — see first-launch instructions below
+- [`Feedscript.exe`](https://github.com/smhammad/feedscript/releases/latest/download/Feedscript.exe) — Windows 10/11, double-click to run
 
 Both builds are fully self-contained. First launch installs any missing system tools (ffmpeg) and downloads the Whisper transcription model (~460 MB, one-time).
 
@@ -33,7 +38,15 @@ Ships as a native Mac app (`Feedscript.app`) and a Windows executable (`Feedscri
 
 ## Install — macOS
 
-Requires macOS 11+ and Python 3 (pre-installed on recent macOS, or `brew install python@3.11`).
+### Homebrew (recommended)
+
+```bash
+brew install --cask smhammad/feedscript/feedscript
+```
+
+Homebrew strips the macOS quarantine attribute for you, so the app opens with a single double-click afterwards. Updates via `brew upgrade --cask feedscript`.
+
+### Manual download
 
 1. Download `Feedscript-macOS.zip` from the [latest release](https://github.com/smhammad/feedscript/releases/latest) and unzip it.
 2. Drag `Feedscript.app` into `/Applications`.
@@ -41,9 +54,11 @@ Requires macOS 11+ and Python 3 (pre-installed on recent macOS, or `brew install
    ```bash
    xattr -dr com.apple.quarantine /Applications/Feedscript.app
    ```
-4. Double-click the app. The setup wizard installs ffmpeg (via Homebrew) and the Whisper model (~460 MB, one-time). Subsequent launches open in about 2 seconds.
+4. Double-click the app.
 
-Alternative: clone the repo and use `./start.command` for a terminal-based launcher — no Gatekeeper dance needed.
+The setup wizard installs ffmpeg (via Homebrew) and the Whisper model (~460 MB, one-time). Subsequent launches open in about 2 seconds.
+
+Alternative for developers: clone the repo and use `./start.command` for a terminal-based launcher.
 
 ## Install — Windows
 
