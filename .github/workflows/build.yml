@@ -24,12 +24,43 @@ jobs:
           codesign --force --deep --sign - Feedscript.app || true
           codesign --verify --verbose Feedscript.app || true
 
-      - name: Zip Feedscript.app
+      - name: Write install instructions alongside the app
+        run: |
+          cat > "READ ME FIRST.txt" <<'EOF'
+          Feedscript for macOS — install instructions
+
+          macOS blocks unsigned apps from opening by default. Getting
+          around it takes one Terminal command — do this once.
+
+          STEP 1. Drag Feedscript.app into /Applications (or any folder
+                  you like).
+
+          STEP 2. Open Terminal and paste this, then hit Enter:
+
+                  xattr -dr com.apple.quarantine /Applications/Feedscript.app
+
+                  (If you put the app somewhere else, adjust the path.)
+
+          STEP 3. Double-click Feedscript.app. The first launch installs
+                  ffmpeg and the Whisper model; after that it opens in
+                  about 2 seconds.
+
+          Why this extra step? Apple requires a paid Developer ID
+          certificate ($99/yr) to skip this dialog. Feedscript is a
+          free open-source tool, so we don't buy one. The full source
+          is here — inspect anything you want:
+
+                  https://github.com/smhammad/feedscript
+          EOF
+
+      - name: Zip Feedscript.app + instructions
         run: |
           mkdir -p dist
           # macOS .app bundles ship as a folder; users expect a .zip they
           # can double-click to unarchive into Applications.
           ditto -c -k --sequesterRsrc --keepParent "Feedscript.app" "dist/Feedscript-macOS.zip"
+          # Tack the instructions file into the same zip
+          (cd "$(pwd)" && zip -j "dist/Feedscript-macOS.zip" "READ ME FIRST.txt")
           ls -la dist/
 
       - name: Upload build artifact
