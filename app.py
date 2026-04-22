@@ -168,7 +168,7 @@ def parse_date(s: Optional[str]) -> Optional[datetime]:
 
 
 def make_loader() -> instaloader.Instaloader:
-    return instaloader.Instaloader(
+    kwargs = dict(
         download_pictures=False,
         download_videos=False,
         download_video_thumbnails=False,
@@ -178,6 +178,14 @@ def make_loader() -> instaloader.Instaloader:
         compress_json=False,
         quiet=True,
     )
+    # Enable the iPhone API path so Post.get_iphone_struct() works.
+    # This is what gives us the accurate `play_count` that matches the
+    # "views" number shown in the Instagram app.
+    try:
+        return instaloader.Instaloader(**kwargs, iphone_support=True)
+    except TypeError:
+        # Older instaloader versions don't accept iphone_support
+        return instaloader.Instaloader(**kwargs)
 
 
 def loader_with_session() -> instaloader.Instaloader:
@@ -308,10 +316,29 @@ def auth_logout():
 
 
 def _post_views(p: instaloader.Post):
-    # Instagram exposes views under different field names for videos vs reels vs
-    # various API versions. Try every known attribute and fall back to the raw
-    # GraphQL node so we catch reel play counts where the dedicated property is
-    # missing.
+    """Return the 'views' number the IG app shows for this post.
+
+    Instagram's public GraphQL API returns `video_view_count`, which is an
+    older "completed view" metric — typically much smaller than the
+    `play_count` shown in the mobile app. The iPhone-style media endpoint
+    returns the accurate `play_count`, so we prefer that when logged in.
+
+    Falls back gracefully to whatever the web API exposed if the iPhone
+    call fails (e.g. rate-limited or older instaloader without the
+    method).
+    """
+    if getattr(p, "is_video", False):
+        try:
+            if hasattr(p, "get_iphone_struct"):
+                struct = p.get_iphone_struct()
+                if struct:
+                    for key in ("play_count", "ig_play_count", "view_count", "video_view_count"):
+                        v = struct.get(key)
+                        if v is not None:
+                            return v
+        except Exception:
+            pass
+
     for attr in ("video_view_count", "video_play_count", "play_count", "viewer_count"):
         try:
             v = getattr(p, attr, None)
