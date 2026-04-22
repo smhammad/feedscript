@@ -16,12 +16,19 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Ad-hoc codesign the .app
+        # Not a Developer ID signature (that costs $99/yr) — just an
+        # ad-hoc signature so macOS has something to attach the
+        # quarantine-bypass decision to after the user runs xattr -dr.
+        run: |
+          codesign --force --deep --sign - Feedscript.app || true
+          codesign --verify --verbose Feedscript.app || true
+
       - name: Zip Feedscript.app
         run: |
           mkdir -p dist
           # macOS .app bundles ship as a folder; users expect a .zip they
           # can double-click to unarchive into Applications.
-          cd "$(pwd)"
           ditto -c -k --sequesterRsrc --keepParent "Feedscript.app" "dist/Feedscript-macOS.zip"
           ls -la dist/
 

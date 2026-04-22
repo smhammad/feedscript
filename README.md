@@ -35,11 +35,15 @@ Ships as a native Mac app (`Feedscript.app`) and a Windows executable (`Feedscri
 
 Requires macOS 11+ and Python 3 (pre-installed on recent macOS, or `brew install python@3.11`).
 
-1. Download or clone this repo.
-2. Double-click `Feedscript.app`. First launch installs the app environment, ffmpeg (via Homebrew), and the Whisper model (~460 MB download, one-time). Subsequent launches open in 2 seconds.
-3. Right-click → Open the first time to bypass Gatekeeper (the app is unsigned).
+1. Download `Feedscript-macOS.zip` from the [latest release](https://github.com/smhammad/feedscript/releases/latest) and unzip it.
+2. Drag `Feedscript.app` into `/Applications`.
+3. **First-launch Gatekeeper step** — because the app isn't signed with a paid Apple Developer certificate, macOS refuses to open it until you remove the quarantine attribute. Run this once in Terminal:
+   ```bash
+   xattr -dr com.apple.quarantine /Applications/Feedscript.app
+   ```
+4. Double-click the app. The setup wizard installs ffmpeg (via Homebrew) and the Whisper model (~460 MB, one-time). Subsequent launches open in about 2 seconds.
 
-Alternative: `./start.command` for a terminal-based launcher.
+Alternative: clone the repo and use `./start.command` for a terminal-based launcher — no Gatekeeper dance needed.
 
 ## Install — Windows
 
