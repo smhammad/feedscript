@@ -6,9 +6,9 @@ Built for people who need to *read* a creator's content to analyze it, not watch
 
 ## Download
 
-**macOS** — [Homebrew](https://brew.sh) (cleanest):
+**macOS** — [Homebrew](https://brew.sh) (cleanest, no Gatekeeper prompt):
 ```bash
-brew install --cask smhammad/feedscript/feedscript
+brew install --cask https://raw.githubusercontent.com/smhammad/feedscript/main/Casks/feedscript.rb
 ```
 
 Or grab the build directly from the [releases page](https://github.com/smhammad/feedscript/releases/latest):
@@ -41,10 +41,10 @@ Ships as a native Mac app (`Feedscript.app`) and a Windows executable (`Feedscri
 ### Homebrew (recommended)
 
 ```bash
-brew install --cask smhammad/feedscript/feedscript
+brew install --cask https://raw.githubusercontent.com/smhammad/feedscript/main/Casks/feedscript.rb
 ```
 
-Homebrew strips the macOS quarantine attribute for you, so the app opens with a single double-click afterwards. Updates via `brew upgrade --cask feedscript`.
+Homebrew downloads the app, strips the macOS quarantine attribute, and drops `Feedscript.app` into `/Applications` — no Gatekeeper prompt, no `xattr` dance. To update later, re-run the same command against a new release tag.
 
 ### Manual download
 
