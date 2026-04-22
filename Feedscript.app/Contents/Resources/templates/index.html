@@ -60,7 +60,7 @@
             <input name="target" placeholder="e.g. natgeo" autocomplete="off" required />
           </label>
           <label>Max to scan
-            <input name="limit" type="number" value="100" min="1" max="1000" />
+            <input name="limit" type="number" value="300" min="1" max="1000" />
           </label>
           <label>Date from
             <input name="date_from" type="date" />
@@ -72,7 +72,10 @@
           <button type="button" id="stop-fetch" class="ghost" disabled>Stop</button>
         </div>
       </form>
-      <div id="profile-info" class="info"></div>
+      <div id="profile-info" class="info hidden">
+        <span class="spinner hidden" id="fetch-spinner"></span>
+        <span id="profile-text"></span>
+      </div>
       <div class="controls hidden" id="controls">
         <div class="row">
           <label>Sort by

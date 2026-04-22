@@ -150,7 +150,7 @@ function startFetch(target, limit, dateFrom, dateTo) {
   $("#post-table").classList.remove("hidden");
   $("#controls").classList.remove("hidden");
   $("#stats").classList.remove("hidden");
-  $("#profile-info").textContent = "Connecting…";
+  setFetchStatus("Connecting to Instagram…", true);
   updateStats("loading");
 
   if (state.fetchSrc) state.fetchSrc.close();
@@ -164,23 +164,27 @@ function startFetch(target, limit, dateFrom, dateTo) {
   src.onmessage = (ev) => {
     const d = JSON.parse(ev.data);
     if (d.error) {
-      $("#profile-info").innerHTML = `<span style="color:#ff8080">${escapeHtml(d.error)}</span>`;
+      setFetchStatus(d.error, false, true);
       src.close(); state.fetchSrc = null;
       $("#stop-fetch").disabled = true;
       return;
     }
     if (d.type === "profile") {
-      $("#profile-info").innerHTML =
-        `@${escapeHtml(d.username)} · ${fmtNum(d.followers)} followers · ${d.posts_count} posts total${d.is_private ? " · private" : ""}`;
+      const info = `@${escapeHtml(d.username)} · ${fmtNum(d.followers)} followers · ${d.posts_count} posts total${d.is_private ? " · private" : ""} · loading videos…`;
+      setFetchStatus(info, true);
     } else if (d.type === "post") {
       state.posts.push(d.post);
       if (passesFilters(d.post)) {
         renderRow(d.post, $("#post-table tbody").children.length + 1);
       }
       updateStats("loading");
+      const profile = $("#profile-text").textContent.split(" · loading")[0];
+      setFetchStatus(`${profile} · ${state.posts.length} loaded`, true);
     } else if (d.type === "done") {
       src.close(); state.fetchSrc = null;
       $("#stop-fetch").disabled = true;
+      const profile = $("#profile-text").textContent.split(" · ")[0];
+      setFetchStatus(`${profile} · ${state.posts.length} videos loaded`, false);
       updateStats("done");
       applySort();
     }
@@ -189,8 +193,20 @@ function startFetch(target, limit, dateFrom, dateTo) {
   src.onerror = () => {
     src.close(); state.fetchSrc = null;
     $("#stop-fetch").disabled = true;
+    setFetchStatus("Connection lost", false, true);
     updateStats("done");
   };
+}
+
+function setFetchStatus(text, loading, error) {
+  const wrap = $("#profile-info");
+  const spinner = $("#fetch-spinner");
+  const txt = $("#profile-text");
+  wrap.classList.remove("hidden");
+  if (loading) spinner.classList.remove("hidden");
+  else spinner.classList.add("hidden");
+  txt.textContent = text;
+  txt.style.color = error ? "var(--err)" : "";
 }
 
 function updateStats(phase) {

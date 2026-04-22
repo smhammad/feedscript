@@ -307,6 +307,29 @@ def auth_logout():
     return {"ok": True}
 
 
+def _post_views(p: instaloader.Post):
+    # Instagram exposes views under different field names for videos vs reels vs
+    # various API versions. Try every known attribute and fall back to the raw
+    # GraphQL node so we catch reel play counts where the dedicated property is
+    # missing.
+    for attr in ("video_view_count", "video_play_count", "play_count", "viewer_count"):
+        try:
+            v = getattr(p, attr, None)
+        except Exception:
+            v = None
+        if v is not None:
+            return v
+    try:
+        node = getattr(p, "_node", None) or {}
+        for key in ("video_play_count", "ig_play_count", "play_count", "video_view_count", "viewer_count"):
+            v = node.get(key)
+            if v is not None:
+                return v
+    except Exception:
+        pass
+    return None
+
+
 def serialize_post(p: instaloader.Post) -> dict:
     return {
         "shortcode": p.shortcode,
@@ -314,7 +337,7 @@ def serialize_post(p: instaloader.Post) -> dict:
         "caption": (p.caption or "")[:2000],
         "likes": p.likes,
         "comments": p.comments,
-        "views": getattr(p, "video_view_count", None),
+        "views": _post_views(p),
         "is_video": p.is_video,
         "timestamp": p.date_utc.isoformat() if p.date_utc else None,
         "thumbnail": p.url,
