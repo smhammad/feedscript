@@ -4,6 +4,15 @@ A local-first desktop app that pulls a creator's top-performing short videos and
 
 Built for people who need to *read* a creator's content to analyze it, not watch hours of it: marketers, researchers, content strategists.
 
+## Download
+
+Grab the latest build from the [releases page](https://github.com/smhammad/feedscript/releases/latest):
+
+- **macOS** (Apple Silicon + Intel) — [`Feedscript-macOS.zip`](https://github.com/smhammad/feedscript/releases/latest/download/Feedscript-macOS.zip) — unzip and drag `Feedscript.app` to `/Applications`
+- **Windows 10/11** — [`Feedscript.exe`](https://github.com/smhammad/feedscript/releases/latest/download/Feedscript.exe) — double-click to run
+
+Both builds are fully self-contained. First launch installs any missing system tools (ffmpeg) and downloads the Whisper transcription model (~460 MB, one-time).
+
 ## What it does
 
 1. You log in with a throwaway account (cookies JSON or username+password).
@@ -34,7 +43,7 @@ Alternative: `./start.command` for a terminal-based launcher.
 
 ## Install — Windows
 
-Grab `Feedscript.exe` from the latest [release](https://github.com/YOUR-USERNAME/feedscript/releases). The `.exe` bundles Python and every app component; the only one-time download is the Whisper model.
+Grab `Feedscript.exe` from the latest [release](https://github.com/smhammad/feedscript/releases/latest). The `.exe` bundles Python and every app component; the only one-time download is the Whisper model.
 
 ffmpeg is installed via `winget` if missing — the setup wizard does it for you.
 

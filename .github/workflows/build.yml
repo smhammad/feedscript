@@ -1,4 +1,4 @@
-name: Build Windows .exe
+name: Build Mac + Windows
 
 on:
   push:
@@ -7,6 +7,41 @@ on:
   workflow_dispatch: {}
 
 jobs:
+  # ------------------------------------------------------------ macOS
+  build-mac:
+    runs-on: macos-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Zip Feedscript.app
+        run: |
+          mkdir -p dist
+          # macOS .app bundles ship as a folder; users expect a .zip they
+          # can double-click to unarchive into Applications.
+          cd "$(pwd)"
+          ditto -c -k --sequesterRsrc --keepParent "Feedscript.app" "dist/Feedscript-macOS.zip"
+          ls -la dist/
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Feedscript-macOS
+          path: dist/Feedscript-macOS.zip
+          if-no-files-found: error
+
+      - name: Attach to GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/Feedscript-macOS.zip
+          draft: false
+          prerelease: false
+          generate_release_notes: true
+
+  # --------------------------------------------------------- Windows
   build-windows:
     runs-on: windows-latest
     permissions:
