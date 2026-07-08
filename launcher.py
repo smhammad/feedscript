@@ -62,6 +62,12 @@ CORE_IMPORTS = {
     "openai-whisper": "whisper",
 }
 
+# Instagram regularly changes its API in ways that break these two packages
+# until they release a fix, so stale versions are the #1 cause of "the app
+# stopped working". Refreshed at most once a day at launch.
+FRAGILE_DEPS = ("instaloader", "yt-dlp")
+DEP_STAMP = DATA_DIR / ".dep_refresh"
+
 _SUBPROCESS_FLAGS = 0x08000000 if IS_WINDOWS else 0  # CREATE_NO_WINDOW
 
 
@@ -94,6 +100,21 @@ def which(cmd: str):
             if candidate.exists() and os.access(candidate, os.X_OK):
                 return str(candidate)
     return shutil.which(cmd)
+
+
+def _python_version(py: str):
+    try:
+        r = subprocess.run(
+            [py, "-c", "import sys; print('%d.%d' % sys.version_info[:2])"],
+            capture_output=True, text=True, timeout=10,
+            creationflags=_SUBPROCESS_FLAGS,
+        )
+        if r.returncode == 0:
+            major, minor = r.stdout.strip().split(".")
+            return int(major), int(minor)
+    except Exception:
+        pass
+    return None
 
 
 def check_python_packages() -> dict:
@@ -232,8 +253,15 @@ class Api:
         if IS_BUNDLED:
             return {"ok": True}  # everything already bundled
         if not VENV_PY.exists():
-            py = which("python3") or which("python") or ("/usr/bin/python3" if not IS_WINDOWS else None)
+            # yt-dlp dropped Python 3.9 in late 2025 — a 3.9 venv would pin
+            # it to an old release that Instagram has since broken, with no
+            # visible error. Require 3.10+ up front instead.
+            candidates = [c for c in (which("python3"), which("python"),
+                                      "/usr/bin/python3" if not IS_WINDOWS else None) if c]
+            py = next((c for c in candidates if (_python_version(c) or (0, 0)) >= (3, 10)), None)
             if not py:
+                if candidates:
+                    return {"ok": False, "error": "Python 3.10 or newer is required (found an older Python). On a Mac: install the package manager above, then run 'brew install python' in Terminal and click Re-check."}
                 return {"ok": False, "error": "Python 3 is not installed."}
             self._push_log("Preparing the app environment…")
             rc = self._stream_cmd([py, "-m", "venv", str(ROOT / "venv")], timeout=180)
@@ -272,11 +300,45 @@ class Api:
         rc = self._stream_cmd(arch_pinned_cmd([VENV_PY, "-c", code]), timeout=1800)
         return {"ok": rc == 0}
 
+    def _refresh_fragile_deps(self) -> None:
+        """Upgrade the packages Instagram keeps breaking, at most once a day.
+
+        Runs in a background thread so launching is never delayed or blocked
+        by a slow network. yt-dlp is imported per transcribe run, so an
+        upgrade usually takes effect in the same launch; instaloader on the
+        next one. The stamp is written only on success, so a failed attempt
+        (offline, PyPI down) is retried on the next launch.
+        """
+        if IS_BUNDLED or not VENV_PY.exists():
+            return
+        try:
+            if time.time() - DEP_STAMP.stat().st_mtime < 24 * 3600:
+                return
+        except OSError:
+            pass  # no stamp yet — check now
+
+        def _run():
+            try:
+                r = subprocess.run(
+                    arch_pinned_cmd([VENV_PY, "-m", "pip", "install", "-q", "--upgrade",
+                                     "--timeout", "15", *FRAGILE_DEPS]),
+                    capture_output=True, text=True, timeout=600,
+                    creationflags=_SUBPROCESS_FLAGS,
+                )
+                if r.returncode == 0:
+                    DEP_STAMP.write_text(time.strftime("%Y-%m-%dT%H:%M:%S"))
+            except Exception:
+                pass
+
+        threading.Thread(target=_run, daemon=True).start()
+
     def launch_app(self) -> dict:
         if self._uvicorn_server is not None or (self.server_proc and self.server_proc.poll() is None):
             if webview.windows:
                 webview.windows[0].load_url(SERVER_URL)
             return {"ok": True}
+
+        self._refresh_fragile_deps()
 
         if IS_BUNDLED:
             # Run uvicorn in-process; no separate Python interpreter exists inside the .exe

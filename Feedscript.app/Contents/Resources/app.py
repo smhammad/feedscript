@@ -11,7 +11,7 @@ import uuid
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from pathlib import Path
-from queue import Queue
+from queue import Empty, Queue
 from typing import Any, Optional
 
 import instaloader
@@ -167,7 +167,7 @@ def parse_date(s: Optional[str]) -> Optional[datetime]:
         return datetime.strptime(s, "%Y-%m-%d").replace(tzinfo=timezone.utc)
 
 
-def make_loader() -> instaloader.Instaloader:
+def make_loader(rate_controller=None) -> instaloader.Instaloader:
     kwargs = dict(
         download_pictures=False,
         download_videos=False,
@@ -177,7 +177,13 @@ def make_loader() -> instaloader.Instaloader:
         save_metadata=False,
         compress_json=False,
         quiet=True,
+        # Two attempts: enough to ride out a single transient blip during a
+        # long scan, but errors still surface in the UI quickly (the default
+        # 3 attempts with long backoffs reads as the app hanging).
+        max_connection_attempts=2,
     )
+    if rate_controller is not None:
+        kwargs["rate_controller"] = rate_controller
     # Enable the iPhone API path so Post.get_iphone_struct() works.
     # This is what gives us the accurate `play_count` that matches the
     # "views" number shown in the Instagram app.
@@ -188,7 +194,7 @@ def make_loader() -> instaloader.Instaloader:
         return instaloader.Instaloader(**kwargs)
 
 
-def loader_with_session() -> instaloader.Instaloader:
+def loader_with_session(rate_controller=None) -> instaloader.Instaloader:
     state = load_state()
     username = state.get("username")
     if not username:
@@ -196,9 +202,38 @@ def loader_with_session() -> instaloader.Instaloader:
     session_file = SESSIONS_DIR / f"{username}.session"
     if not session_file.exists():
         raise HTTPException(401, "Session missing, re-login")
-    L = make_loader()
+    L = make_loader(rate_controller)
     L.load_session_from_file(username, str(session_file))
     return L
+
+
+class _StopRequested(Exception):
+    """Raised inside a fetch worker thread when the client has gone away."""
+
+
+def _responsive_rate_controller(stop: threading.Event, events: Queue):
+    """A RateController whose sleeps are interruptible and visible.
+
+    instaloader proactively sleeps to respect Instagram's limits — up to
+    ~25 minutes once ~199 iPhone-API calls accumulate in a 30-minute
+    window. Its default implementation is one opaque time.sleep, which
+    reads as the app hanging and ignores Stop. This one ticks once a
+    second, honours stop, and tells the UI about longer waits.
+    """
+    class _RC(instaloader.RateController):
+        def sleep(self, secs: float) -> None:
+            if secs > 10:
+                events.put({"type": "status",
+                            "message": f"Instagram rate limit — waiting {int(secs // 60)}m {int(secs % 60):02d}s, or press Stop"})
+            deadline = time.time() + secs
+            while True:
+                remaining = deadline - time.time()
+                if remaining <= 0:
+                    return
+                if stop.is_set():
+                    raise _StopRequested()
+                time.sleep(min(1.0, remaining))
+    return lambda ctx: _RC(ctx)
 
 
 app = FastAPI()
@@ -266,7 +301,7 @@ def auth_cookies(body: CookieLogin):
     except Exception as e:
         raise HTTPException(400, f"Cookie check failed: {e}")
     if not username:
-        raise HTTPException(400, "Cookies rejected by Instagram")
+        raise HTTPException(400, "Instagram didn't confirm the login — it may be rate-limiting right now. Wait a few minutes and try again.")
     L.context.username = username
     session_file = SESSIONS_DIR / f"{username}.session"
     L.save_session_to_file(str(session_file))
@@ -295,7 +330,7 @@ def auth_cookies_json(body: CookieJsonLogin):
     except Exception as e:
         raise HTTPException(400, f"Cookie check failed: {e}")
     if not username:
-        raise HTTPException(400, "Cookies rejected by Instagram")
+        raise HTTPException(400, "Instagram didn't confirm the login — it may be rate-limiting right now. Wait a few minutes and try again.")
     L.context.username = username
     session_file = SESSIONS_DIR / f"{username}.session"
     L.save_session_to_file(str(session_file))
@@ -315,25 +350,57 @@ def auth_logout():
     return {"ok": True}
 
 
+def _safe(fn, default=None):
+    try:
+        return fn()
+    except Exception:
+        return default
+
+
+def _media_info_struct(p: instaloader.Post) -> dict:
+    """Full iPhone media-info struct for a post, fetched once and cached.
+
+    The profile feed now embeds a partial iphone_struct in each node that
+    carries like/comment counts but no play counts, and Instagram blocks
+    instaloader's full-metadata GraphQL query (`p.comments`,
+    `p.video_play_count`, … raise). This endpoint is the one reliable
+    source left for the view counts shown in the IG app.
+    """
+    cached = getattr(p, "_fs_media_info", None)
+    if cached is not None:
+        return cached
+    info: dict = {}
+    try:
+        data = p._context.get_iphone_json(path=f"api/v1/media/{p.mediaid}/info/", params={})
+        items = data.get("items") or []
+        if items and isinstance(items[0], dict):
+            info = items[0]
+    except Exception:
+        pass
+    try:
+        p._fs_media_info = info
+    except Exception:
+        pass
+    return info
+
+
 def _post_views(p: instaloader.Post):
     """Return the 'views' number the IG app shows for this post.
 
     Order of preference:
-      1. iPhone-style media endpoint `play_count` — matches IG app exactly.
-         Instaloader exposes it via the `_iphone_struct` property (name
-         starts with underscore but it is the public path; no callable
-         alternative in instaloader 4.15).
-      2. `video_play_count` property (instaloader >= 4.14.3) — may fall
-         back to a GraphQL call that can also return play_count.
-      3. Legacy `video_view_count` — the older "completed views" metric
-         usually surfaced by the public web API. Last resort; will often
-         undercount vs. what the IG app shows.
+      1. The iphone_struct embedded in the feed node (no extra request) —
+         empty of counts as of mid-2026, but free if Instagram restores it.
+      2. iPhone media-info endpoint `play_count` — matches the IG app.
+      3. `video_play_count` / `video_view_count` properties — blocked by
+         Instagram as of mid-2026 (full-metadata query returns 400), only
+         tried if the media-info request itself failed.
+      4. Raw feed-node keys.
     """
     if not getattr(p, "is_video", False):
         return None
 
     try:
-        struct = p._iphone_struct  # property access triggers the API call
+        struct = p._iphone_struct
         if struct:
             for key in ("play_count", "ig_play_count", "view_count"):
                 v = struct.get(key)
@@ -342,106 +409,198 @@ def _post_views(p: instaloader.Post):
     except Exception:
         pass
 
-    try:
-        v = getattr(p, "video_play_count", None)
+    info = _media_info_struct(p)
+    for key in ("play_count", "ig_play_count", "view_count"):
+        v = info.get(key)
         if v is not None:
             return v
-    except Exception:
-        pass
 
-    try:
-        v = p.video_view_count
-        if v is not None:
-            return v
-    except Exception:
-        pass
-
-    try:
-        node = getattr(p, "_node", None) or {}
-        for key in ("video_play_count", "ig_play_count", "play_count", "video_view_count", "viewer_count"):
-            v = node.get(key)
+    if not info:
+        for attr in ("video_play_count", "video_view_count"):
+            v = _safe(lambda: getattr(p, attr, None))
             if v is not None:
                 return v
-    except Exception:
-        pass
+
+    node = _safe(lambda: getattr(p, "_node", None)) or {}
+    for key in ("video_play_count", "ig_play_count", "play_count", "video_view_count", "viewer_count"):
+        v = node.get(key)
+        if v is not None:
+            return v
     return None
+
+
+def _post_likes(p: instaloader.Post):
+    # Instagram uses -1 for hidden like counts, so every source must pass
+    # the >= 0 guard or we'd return the same sentinel the previous source
+    # was rejected for.
+    v = _safe(lambda: p.likes)
+    if v is not None and v >= 0:
+        return v
+    node = _safe(lambda: getattr(p, "_node", None)) or {}
+    v = _safe(lambda: (node.get("edge_media_preview_like") or {}).get("count"))
+    if v is not None and v >= 0:
+        return v
+    v = _media_info_struct(p).get("like_count")
+    if v is not None and v >= 0:
+        return v
+    return None
+
+
+def _post_comments(p: instaloader.Post):
+    # The feed node carries the count directly; instaloader's p.comments
+    # property instead triggers the blocked full-metadata query, so it is
+    # only tried last.
+    node = _safe(lambda: getattr(p, "_node", None)) or {}
+    v = node.get("comments")
+    if isinstance(v, int):
+        return v
+    v = _safe(lambda: (node.get("edge_media_to_comment") or {}).get("count"))
+    if v is not None:
+        return v
+    v = _safe(lambda: (p._iphone_struct or {}).get("comment_count"))
+    if v is not None:
+        return v
+    v = _media_info_struct(p).get("comment_count")
+    if v is not None:
+        return v
+    return _safe(lambda: p.comments)
 
 
 def serialize_post(p: instaloader.Post) -> dict:
     return {
         "shortcode": p.shortcode,
         "url": f"https://www.instagram.com/p/{p.shortcode}/",
-        "caption": (p.caption or "")[:2000],
-        "likes": p.likes,
-        "comments": p.comments,
+        "caption": _safe(lambda: (p.caption or "")[:2000], ""),
+        "likes": _post_likes(p),
+        "comments": _post_comments(p),
         "views": _post_views(p),
-        "is_video": p.is_video,
-        "timestamp": p.date_utc.isoformat() if p.date_utc else None,
-        "thumbnail": p.url,
+        "is_video": _safe(lambda: p.is_video, False),
+        "timestamp": _safe(lambda: p.date_utc.isoformat() if p.date_utc else None),
+        "thumbnail": _safe(lambda: p.url, ""),
     }
 
 
 @app.get("/api/posts/{target}")
 async def stream_posts(
     target: str,
+    request: Request,
     limit: int = 200,
     date_from: Optional[str] = None,
     date_to: Optional[str] = None,
 ):
     target = target.strip().lstrip("@")
-    df = parse_date(date_from)
-    dt = parse_date(date_to)
+    events: Queue = Queue()
+    stop = threading.Event()
 
-    async def gen():
+    def produce():
         try:
-            L = loader_with_session()
+            df = parse_date(date_from)
+            dt = parse_date(date_to)
+        except ValueError:
+            events.put({"error": "Invalid date filter"})
+            return
+        try:
+            L = loader_with_session(_responsive_rate_controller(stop, events))
         except HTTPException as e:
-            yield sse_event({"error": e.detail})
+            events.put({"error": e.detail})
+            return
+        if stop.is_set():
             return
         try:
             profile = instaloader.Profile.from_username(L.context, target)
+            # These properties lazily hit Instagram's API, so build the dict
+            # inside the try block — a failure here must surface as an error
+            # event, not kill the stream.
+            profile_event = {
+                "type": "profile",
+                "username": profile.username,
+                "full_name": profile.full_name,
+                "posts_count": profile.mediacount,
+                "followers": profile.followers,
+                "is_private": profile.is_private,
+            }
+            blocked = profile.is_private and not profile.followed_by_viewer
+        except _StopRequested:
+            return
         except instaloader.exceptions.ProfileNotExistsException:
-            yield sse_event({"error": "Profile not found"})
+            events.put({"error": "Profile not found"})
             return
         except Exception as e:
-            yield sse_event({"error": str(e) or type(e).__name__})
+            events.put({"error": str(e) or type(e).__name__})
             return
 
-        yield sse_event({
-            "type": "profile",
-            "username": profile.username,
-            "full_name": profile.full_name,
-            "posts_count": profile.mediacount,
-            "followers": profile.followers,
-            "is_private": profile.is_private,
-        })
+        events.put(profile_event)
 
-        if profile.is_private and not profile.followed_by_viewer:
-            yield sse_event({"error": "Profile is private and not followed"})
+        if blocked:
+            events.put({"error": "Profile is private and not followed"})
             return
 
         count = 0
         scanned = 0
+        seen: set = set()
         try:
             for post in profile.get_posts():
+                if stop.is_set():
+                    return
                 scanned += 1
                 post_dt = post.date_utc.replace(tzinfo=timezone.utc) if post.date_utc else None
                 if df and post_dt and post_dt < df:
-                    break
+                    # Pinned posts are yielded first regardless of age (up to
+                    # 3 of them), so an old pinned post must not end a
+                    # date-filtered fetch.
+                    if scanned > 3:
+                        break
+                    continue
                 if not post.is_video:
                     continue
                 if dt and post_dt and post_dt > dt:
                     continue
+                if post.shortcode in seen:
+                    # Pinned posts come around a second time in date order.
+                    continue
+                seen.add(post.shortcode)
                 count += 1
-                yield sse_event({"type": "post", "post": serialize_post(post)})
+                events.put({"type": "post", "post": serialize_post(post)})
                 if count >= limit:
                     break
-                await async_human_sleep(0.25, 0.65)
+                human_sleep(0.25, 0.65)
+        except _StopRequested:
+            return
         except Exception as e:
-            yield sse_event({"error": "Stopped: " + (str(e) or type(e).__name__)})
+            events.put({"error": "Stopped: " + (str(e) or type(e).__name__)})
             return
 
-        yield sse_event({"type": "done", "count": count, "scanned": scanned})
+        events.put({"type": "done", "count": count, "scanned": scanned})
+
+    def produce_safely():
+        # All instaloader work happens on this worker thread: its blocking
+        # requests must never run on the event loop, or every other request
+        # (and the whole UI) freezes until Instagram answers.
+        try:
+            produce()
+        except Exception as e:
+            events.put({"error": str(e) or type(e).__name__})
+        finally:
+            events.put(None)
+
+    async def gen():
+        threading.Thread(target=produce_safely, daemon=True).start()
+        try:
+            while True:
+                if await request.is_disconnected():
+                    return
+                try:
+                    item = events.get_nowait()
+                except Empty:
+                    await asyncio.sleep(0.15)
+                    continue
+                if item is None:
+                    return
+                yield sse_event(item)
+        finally:
+            # Tell the worker to stop scanning — an abandoned stream must not
+            # keep spending Instagram's rate budget.
+            stop.set()
 
     return StreamingResponse(gen(), media_type="text/event-stream")
 
@@ -471,6 +630,41 @@ def safe_name(s: str) -> str:
     return re.sub(r"[^A-Za-z0-9_.-]", "_", s).strip("_") or "run"
 
 
+_finals_lock = threading.Lock()
+_active_finals: set = set()
+
+
+def _reserve_final_file(out_dir: Path, run_name: str) -> Path:
+    """Pick a results path no other *running* job owns.
+
+    Two jobs submitted in the same second get the same timestamp run_name
+    (and a re-used custom name collides too); without this, whichever job
+    finishes last silently overwrites the other's transcripts. Re-running
+    with the same name after a job has finished still replaces the old
+    file, as before.
+    """
+    with _finals_lock:
+        candidate = out_dir / f"{run_name}.json"
+        n = 2
+        while candidate in _active_finals:
+            candidate = out_dir / f"{run_name}_{n}.json"
+            n += 1
+        _active_finals.add(candidate)
+        return candidate
+
+
+def _sweep_stale_tmp(out_dir: Path) -> None:
+    """Remove _tmp_* dirs older than a day — leftovers from crashed or
+    force-quit jobs that never reached their own cleanup."""
+    cutoff = time.time() - 24 * 3600
+    try:
+        for d in out_dir.glob("_tmp_*"):
+            if d.is_dir() and d.stat().st_mtime < cutoff:
+                shutil.rmtree(d, ignore_errors=True)
+    except OSError:
+        pass
+
+
 def get_whisper(model_name: str):
     import whisper
     if model_name not in _whisper_models:
@@ -485,6 +679,7 @@ def emit(job: dict, event: dict) -> None:
 
 def run_transcribe_job(job_id: str, req: TranscribeRequest):
     job = _jobs[job_id]
+    final_file: Optional[Path] = None
     try:
         L = loader_with_session()
         target = req.target.strip().lstrip("@")
@@ -502,9 +697,13 @@ def run_transcribe_job(job_id: str, req: TranscribeRequest):
         base_out.mkdir(parents=True, exist_ok=True)
         out_dir = base_out / safe_name(target)
         out_dir.mkdir(parents=True, exist_ok=True)
-        temp_dir = out_dir / f"_tmp_{run_name}"
+        _sweep_stale_tmp(out_dir)
+        final_file = _reserve_final_file(out_dir, run_name)
+        run_name = final_file.stem
+        # uuid suffix: two jobs started in the same second must not share a
+        # temp dir, or their downloads overwrite each other.
+        temp_dir = out_dir / f"_tmp_{run_name}_{uuid.uuid4().hex[:6]}"
         temp_dir.mkdir(exist_ok=True)
-        final_file = out_dir / f"{run_name}.json"
         job["out_dir"] = str(out_dir)
         job["final_file"] = str(final_file)
 
@@ -600,6 +799,10 @@ def run_transcribe_job(job_id: str, req: TranscribeRequest):
     except Exception as e:
         emit(job, {"type": "job_error", "error": str(e) or type(e).__name__})
         job["done"] = True
+    finally:
+        if final_file is not None:
+            with _finals_lock:
+                _active_finals.discard(final_file)
 
 
 def _cleanup_temp(temp_dir: Path) -> None:
@@ -615,6 +818,15 @@ def _cleanup_temp(temp_dir: Path) -> None:
 def transcribe_start(req: TranscribeRequest):
     if not req.posts:
         raise HTTPException(400, "No posts selected")
+    # Duplicate shortcodes (e.g. a pinned reel selected twice) would download
+    # to the same paths concurrently and corrupt each other.
+    seen: set = set()
+    unique_posts = []
+    for p in req.posts:
+        if p.shortcode not in seen:
+            seen.add(p.shortcode)
+            unique_posts.append(p)
+    req.posts = unique_posts
     job_id = uuid.uuid4().hex
     _jobs[job_id] = {"events": [], "done": False, "cancelled": False}
     executor.submit(run_transcribe_job, job_id, req)

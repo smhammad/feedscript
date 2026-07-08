@@ -172,7 +172,10 @@ function startFetch(target, limit, dateFrom, dateTo) {
     if (d.type === "profile") {
       const info = `@${escapeHtml(d.username)} · ${fmtNum(d.followers)} followers · ${d.posts_count} posts total${d.is_private ? " · private" : ""} · loading videos…`;
       setFetchStatus(info, true);
+    } else if (d.type === "status") {
+      setFetchStatus(d.message, true);
     } else if (d.type === "post") {
+      if (state.posts.some(p => p.shortcode === d.post.shortcode)) return;
       state.posts.push(d.post);
       if (passesFilters(d.post)) {
         renderRow(d.post, $("#post-table tbody").children.length + 1);
@@ -280,9 +283,9 @@ $("#check-all").onchange = (e) => {
 
 $("#btn-transcribe").onclick = async () => {
   const rows = [...$("#post-table tbody").querySelectorAll("tr")];
-  const selectedCodes = rows
+  const selectedCodes = [...new Set(rows
     .filter(r => r.querySelector(".post-check").checked)
-    .map(r => r.dataset.shortcode);
+    .map(r => r.dataset.shortcode))];
   if (!selectedCodes.length) { alert("Select at least one post."); return; }
   const byCode = new Map(state.posts.map(p => [p.shortcode, p]));
   const posts = selectedCodes
@@ -301,7 +304,13 @@ $("#btn-transcribe").onclick = async () => {
   const runName = $("#run-name").value.trim();
   const outputDir = $("#output-dir").value.trim();
   if (outputDir) localStorage.setItem("igt_output_dir", outputDir);
-  startJob({ target, posts, model, run_name: runName || null, output_dir: outputDir || null });
+  const btn = $("#btn-transcribe");
+  btn.disabled = true;
+  try {
+    await startJob({ target, posts, model, run_name: runName || null, output_dir: outputDir || null });
+  } finally {
+    btn.disabled = false;
+  }
 };
 
 (() => {
