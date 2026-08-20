@@ -3,6 +3,12 @@
 # new v* tag has been pushed and GitHub Actions has attached
 # Feedscript-macOS.zip to the release.
 #
+# NOTE ON ORDER: the version in Info.plist has to be bumped and committed
+# BEFORE the tag is created, because the release zips the .app as it is at
+# that tag. This script re-writes the plist too, but by the time it can run
+# (the zip must exist to be checksummed) that release has already been built
+# — so it only keeps the working tree honest for next time.
+#
 # Usage:  ./bump-cask.sh 0.1.2
 
 set -e
