@@ -38,21 +38,87 @@ die() {
     exit 1
 }
 
-if ! command -v python3 >/dev/null 2>&1; then
-    die "Python 3 is required. Install it from python.org or run: brew install python@3.11"
+# ---------------------------------------------------------------- Python
+# yt-dlp dropped Python 3.9 in late 2025 and instaloader is heading the same
+# way. A 3.9 venv still *builds* fine, then silently resolves both to
+# releases Instagram has long since broken — the app opens and every fetch
+# fails. So pick an interpreter that is new enough, and refuse rather than
+# quietly build an environment that cannot work.
+MIN_MINOR=10
+
+py_minor() {
+    "$1" -c 'import sys; print(sys.version_info[1] if sys.version_info[0] == 3 else -1)' 2>/dev/null
+}
+
+py_is_new_enough() {
+    local m
+    m="$(py_minor "$1")"
+    [ -n "$m" ] && [ "$m" -ge "$MIN_MINOR" ] 2>/dev/null
+}
+
+find_python() {
+    local cand resolved v
+    # Launched from Finder, PATH is just /usr/bin:/bin:/usr/sbin:/sbin — it
+    # holds the system 3.9 and nothing else. So the usual install locations
+    # are probed by absolute path rather than trusted to be on PATH.
+    local candidates="python3.14 python3.13 python3.12 python3.11 python3.10 python3"
+    for v in 3.14 3.13 3.12 3.11 3.10; do
+        candidates="$candidates /opt/homebrew/bin/python$v /usr/local/bin/python$v"
+        candidates="$candidates /Library/Frameworks/Python.framework/Versions/$v/bin/python3"
+        candidates="$candidates $HOME/.local/bin/python$v"           # uv, pipx
+        candidates="$candidates $HOME/.pyenv/versions/*/bin/python$v"
+    done
+    candidates="$candidates /opt/homebrew/bin/python3 /usr/local/bin/python3"
+    candidates="$candidates $HOME/.local/bin/python3 $HOME/.pyenv/shims/python3"
+    for cand in $candidates; do
+        resolved="$(command -v "$cand" 2>/dev/null)" || continue
+        [ -n "$resolved" ] || continue
+        if py_is_new_enough "$resolved"; then
+            echo "$resolved"
+            return 0
+        fi
+    done
+    return 1
+}
+
+VENV_PY="$DATA_DIR/venv/bin/python3"
+
+# A venv that already runs a new enough Python is self-sufficient: it does not
+# matter whether a system Python is still installed, so don't go looking for
+# one (a user who installed via Homebrew and later removed it would otherwise
+# be locked out of a perfectly good environment).
+if py_is_new_enough "$VENV_PY"; then
+    echo "Using existing environment: $("$VENV_PY" -V 2>&1)"
+else
+    PYTHON="$(find_python)"
+    if [ -z "$PYTHON" ]; then
+        if command -v python3 >/dev/null 2>&1; then
+            die "Feedscript needs Python 3.10 or newer — the Python on this Mac is $(python3 -V 2>&1 | sed 's/Python //'). Install a current one from python.org/downloads (or run 'brew install python' in Terminal), then open Feedscript again."
+        fi
+        die "Python 3 is required. Install it from python.org/downloads, then open Feedscript again."
+    fi
+    echo "Using interpreter: $PYTHON ($("$PYTHON" -V 2>&1))"
+
+    # Anything already there is either too old or broken (a dangling
+    # interpreter symlink after the Python it was built from was upgraded
+    # away). Either way its site-packages cannot be trusted, and this
+    # directory holds nothing but app dependencies — only the interpreter
+    # search above may abort, and it already has.
+    if [ -d "$DATA_DIR/venv" ]; then
+        echo "Rebuilding app environment (it is not usable with Python 3.$MIN_MINOR+)"
+        rm -rf "$DATA_DIR/venv"
+    fi
+
+    "$PYTHON" -m venv "$DATA_DIR/venv" || die "Could not set up the app environment at $DATA_DIR/venv."
+    "$VENV_PY" -m pip install --upgrade pip >/dev/null 2>&1
 fi
 
-if [ ! -x "$DATA_DIR/venv/bin/python3" ]; then
-    python3 -m venv "$DATA_DIR/venv" || die "Could not set up the app environment at $DATA_DIR/venv."
-    "$DATA_DIR/venv/bin/pip" install --upgrade pip >/dev/null 2>&1
-fi
-
-if ! "$DATA_DIR/venv/bin/python3" -c "import webview" 2>/dev/null; then
-    "$DATA_DIR/venv/bin/pip" install pywebview || die "Could not install the app window library. Check $LOG."
+if ! "$VENV_PY" -c "import webview" 2>/dev/null; then
+    "$VENV_PY" -m pip install pywebview || die "Could not install the app window library. Check $LOG."
 fi
 
 if [[ "$(uname -m)" == "arm64" ]]; then
-    exec arch -arm64 "$DATA_DIR/venv/bin/python3" "$CODE_DIR/launcher.py"
+    exec arch -arm64 "$VENV_PY" "$CODE_DIR/launcher.py"
 else
-    exec "$DATA_DIR/venv/bin/python3" "$CODE_DIR/launcher.py"
+    exec "$VENV_PY" "$CODE_DIR/launcher.py"
 fi

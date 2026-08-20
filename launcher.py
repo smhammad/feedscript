@@ -68,6 +68,12 @@ CORE_IMPORTS = {
 FRAGILE_DEPS = ("instaloader", "yt-dlp")
 DEP_STAMP = DATA_DIR / ".dep_refresh"
 
+# yt-dlp dropped Python 3.9 in late 2025. On 3.9 pip still resolves it — to a
+# release Instagram broke months ago — so an old interpreter produces an app
+# that launches and then fails every fetch. Refuse to build or keep such an
+# environment.
+MIN_PY = (3, 10)
+
 _SUBPROCESS_FLAGS = 0x08000000 if IS_WINDOWS else 0  # CREATE_NO_WINDOW
 
 
@@ -117,11 +123,35 @@ def _python_version(py: str):
     return None
 
 
+def _venv_python_version():
+    if not VENV_PY.exists():
+        return None
+    return _python_version(str(VENV_PY))
+
+
+def venv_needs_rebuild() -> bool:
+    """True when there is no venv, or the one we have runs a Python too old
+    for the current dependency set."""
+    if not VENV_PY.exists():
+        return True
+    version = _venv_python_version()
+    if version is None:
+        # The probe did not answer — a slow disk, an antivirus scan holding
+        # the file, a machine under load. That is not evidence the venv is
+        # too old, and acting on it would delete the environment this very
+        # process is running from. Leave it alone.
+        return False
+    return version < MIN_PY
+
+
 def check_python_packages() -> dict:
     if IS_BUNDLED:
         # Inside a PyInstaller bundle every dep is already packaged in
         return {"venv_ready": True, "missing": [], "present": list(CORE_IMPORTS.keys())}
-    if not VENV_PY.exists():
+    if venv_needs_rebuild():
+        # Report an out-of-date interpreter as "not ready" so the setup wizard
+        # offers to rebuild, instead of showing a green environment whose
+        # dependencies cannot work.
         return {"venv_ready": False, "missing": list(CORE_IMPORTS.keys()), "present": []}
     mapping = list(CORE_IMPORTS.items())
     script = (
@@ -252,17 +282,28 @@ class Api:
     def install_packages(self) -> dict:
         if IS_BUNDLED:
             return {"ok": True}  # everything already bundled
-        if not VENV_PY.exists():
-            # yt-dlp dropped Python 3.9 in late 2025 — a 3.9 venv would pin
-            # it to an old release that Instagram has since broken, with no
-            # visible error. Require 3.10+ up front instead.
-            candidates = [c for c in (which("python3"), which("python"),
-                                      "/usr/bin/python3" if not IS_WINDOWS else None) if c]
-            py = next((c for c in candidates if (_python_version(c) or (0, 0)) >= (3, 10)), None)
+        if venv_needs_rebuild():
+            # Find the replacement interpreter BEFORE touching anything: a
+            # user with an unusable 3.9 venv and no newer Python must be left
+            # exactly as they were, not stripped of the environment too.
+            # Versioned names come first because on macOS a bare "python3" is
+            # the system 3.9 even when a newer one is installed alongside.
+            names = ["python3.14", "python3.13", "python3.12", "python3.11", "python3.10",
+                     "python3", "python"]
+            candidates = [c for c in [which(n) for n in names] if c]
+            if not IS_WINDOWS and Path("/usr/bin/python3").exists():
+                candidates.append("/usr/bin/python3")
+            py = next((c for c in candidates if (_python_version(c) or (0, 0)) >= MIN_PY), None)
             if not py:
                 if candidates:
-                    return {"ok": False, "error": "Python 3.10 or newer is required (found an older Python). On a Mac: install the package manager above, then run 'brew install python' in Terminal and click Re-check."}
+                    return {"ok": False, "error": "Python %d.%d or newer is required (the Python on this machine is older). On a Mac: install the package manager above, then run 'brew install python' in Terminal and click Re-check." % MIN_PY}
                 return {"ok": False, "error": "Python 3 is not installed."}
+            if VENV_PY.exists():
+                # Built by an older Feedscript against the system Python.
+                # Nothing but app dependencies lives in here, so replacing it
+                # is safe — and it is the only way off the broken 3.9 pins.
+                self._push_log("Rebuilding the app environment — the existing one runs an unsupported Python.")
+                shutil.rmtree(ROOT / "venv", ignore_errors=True)
             self._push_log("Preparing the app environment…")
             rc = self._stream_cmd([py, "-m", "venv", str(ROOT / "venv")], timeout=180)
             if rc != 0:
