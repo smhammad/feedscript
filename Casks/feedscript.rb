@@ -1,6 +1,6 @@
 cask "feedscript" do
   version "0.1.3"
-  sha256 "faa4dbeb32153ffdfe91c66af1744c2dba06e1a7d42627a3f0a42411d7c7025b"
+  sha256 "cb8d6c64442749b93a9f95a08c75ea214e946b3142e1e7c6a459d5145bb20c04"
 
   url "https://github.com/smhammad/feedscript/releases/download/v#{version}/Feedscript-macOS.zip"
   name "Feedscript"
