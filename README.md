@@ -46,7 +46,7 @@ curl -fsSL https://raw.githubusercontent.com/smhammad/feedscript/main/install.sh
 
 This downloads the latest release, strips the macOS quarantine attribute, and installs `Feedscript.app` into `/Applications` — no Gatekeeper prompt. Re-run the same command to update to a new release.
 
-You can inspect the script first at [install.sh](install.sh) if you'd rather not pipe to `bash` blind — it's 40 lines.
+You can inspect the script first at [install.sh](install.sh) if you'd rather not pipe to `bash` blind — it's 49 lines.
 
 ### Homebrew tap
 

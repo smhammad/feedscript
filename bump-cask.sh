@@ -35,6 +35,18 @@ src = re.sub(r'version "[^"]+"', f'version "{"$VERSION"}"', src)
 src = re.sub(r'sha256 "[^"]+"', f'sha256 "{"$SHA"}"', src)
 p.write_text(src)
 print(f"→ Updated {p}")
+
+# Keep the bundle's own version in step, or brew audit flags the mismatch.
+q = pathlib.Path("Feedscript.app/Contents/Info.plist")
+plist = q.read_text()
+for key in ("CFBundleShortVersionString", "CFBundleVersion"):
+    plist = re.sub(
+        r'(<key>' + key + r'</key>\s*<string>)[^<]*(</string>)',
+        lambda m: m.group(1) + "$VERSION" + m.group(2),
+        plist,
+    )
+q.write_text(plist)
+print(f"→ Updated {q}")
 PY
 
 echo "Done. Review with: git diff Casks/feedscript.rb"

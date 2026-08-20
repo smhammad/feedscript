@@ -14,9 +14,10 @@ cask "feedscript" do
 
   app "Feedscript.app"
 
+  # ~/.cache/whisper is deliberately not zapped: the model cache is shared
+  # with every other Whisper tool on the machine, and is not ours to delete.
   zap trash: [
     "~/Library/Application Support/Feedscript",
     "~/Library/Logs/Feedscript",
-    "~/.cache/whisper",
   ]
 end
