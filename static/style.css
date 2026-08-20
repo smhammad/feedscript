@@ -64,6 +64,13 @@ header h1 {
   border-radius: 5px;
 }
 #auth-bar button:hover { color: var(--fg); border-color: var(--fg-dim); }
+.auth-warn {
+  color: var(--err);
+  border: 1px solid var(--err);
+  border-radius: 5px;
+  padding: 3px 8px;
+  font-size: 11px;
+}
 
 main {
   padding: 18px 22px;

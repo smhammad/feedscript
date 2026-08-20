@@ -19,10 +19,15 @@ $$(".nav-item").forEach(btn => {
   btn.onclick = () => show("#" + btn.dataset.screen);
 });
 
-function setAuthBar(username) {
+function setAuthBar(username, sessionOk) {
   const bar = $("#auth-bar");
   if (username) {
-    bar.innerHTML = `<span>Logged in as <strong>${escapeHtml(username)}</strong></span>
+    // sessionOk is true / false / null — null means "not checked yet", which
+    // is what the first call after startup always returns.
+    const warn = sessionOk === false
+      ? `<span class="auth-warn" title="Instagram no longer accepts the saved session.">session expired — log out and back in</span>`
+      : "";
+    bar.innerHTML = `<span>Logged in as <strong>${escapeHtml(username)}</strong></span>${warn}
       <button id="btn-logout">Log out</button>`;
     $("#btn-logout").onclick = async () => {
       await fetch("/api/auth/logout", { method: "POST" });
@@ -60,9 +65,24 @@ async function checkAuth() {
   const d = await r.json();
   const nav = $("#app-nav");
   if (d.logged_in) {
-    setAuthBar(d.username);
+    setAuthBar(d.username, d.session_ok);
     nav.classList.remove("hidden");
     show("#screen-main");
+    if (d.session_ok == null) {
+      // The server checks the session in the background so this request never
+      // blocks on Instagram — look again once that has had time to land, and
+      // keep looking a few times in case the check is slow.
+      let tries = 0;
+      const poll = async () => {
+        try {
+          const d2 = await (await fetch("/api/auth/status")).json();
+          if (!d2.logged_in) return;
+          setAuthBar(d2.username, d2.session_ok);
+          if (d2.session_ok == null && ++tries < 4) setTimeout(poll, 5000);
+        } catch (e) { /* offline — leave the bar as it is */ }
+      };
+      setTimeout(poll, 5000);
+    }
   } else {
     setAuthBar(null);
     nav.classList.add("hidden");
@@ -160,6 +180,9 @@ function startFetch(target, limit, dateFrom, dateTo) {
   const src = new EventSource(`/api/posts/${encodeURIComponent(target)}?${params}`);
   state.fetchSrc = src;
   $("#stop-fetch").disabled = false;
+  // Kept here rather than re-parsed out of #profile-text on every event: that
+  // compounded the suffix on each post and lost the header on any status line.
+  let profileLine = "";
 
   src.onmessage = (ev) => {
     const d = JSON.parse(ev.data);
@@ -170,10 +193,10 @@ function startFetch(target, limit, dateFrom, dateTo) {
       return;
     }
     if (d.type === "profile") {
-      const info = `@${escapeHtml(d.username)} · ${fmtNum(d.followers)} followers · ${d.posts_count} posts total${d.is_private ? " · private" : ""} · loading videos…`;
-      setFetchStatus(info, true);
+      profileLine = `@${escapeHtml(d.username)} · ${fmtNum(d.followers)} followers · ${fmtNum(d.posts_count)} posts total${d.is_private ? " · private" : ""}`;
+      setFetchStatus(`${profileLine} · loading videos…`, true);
     } else if (d.type === "status") {
-      setFetchStatus(d.message, true);
+      setFetchStatus(profileLine ? `${profileLine} · ${d.message}` : d.message, true);
     } else if (d.type === "post") {
       if (state.posts.some(p => p.shortcode === d.post.shortcode)) return;
       state.posts.push(d.post);
@@ -181,13 +204,11 @@ function startFetch(target, limit, dateFrom, dateTo) {
         renderRow(d.post, $("#post-table tbody").children.length + 1);
       }
       updateStats("loading");
-      const profile = $("#profile-text").textContent.split(" · loading")[0];
-      setFetchStatus(`${profile} · ${state.posts.length} loaded`, true);
+      setFetchStatus(`${profileLine} · ${state.posts.length} loaded`, true);
     } else if (d.type === "done") {
       src.close(); state.fetchSrc = null;
       $("#stop-fetch").disabled = true;
-      const profile = $("#profile-text").textContent.split(" · ")[0];
-      setFetchStatus(`${profile} · ${state.posts.length} videos loaded`, false);
+      setFetchStatus(`${profileLine} · ${state.posts.length} videos loaded`, false);
       updateStats("done");
       applySort();
     }
